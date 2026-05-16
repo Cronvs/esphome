@@ -196,7 +196,8 @@ void TimeBasedCover::update_external_state(bool up_active, bool down_active) {
     desired_op = COVER_OPERATION_CLOSING;
   }
 
-  if (this->current_operation == desired_op) return;
+  if (this->current_operation == desired_op)
+    return;
 
   this->recompute_position_();
 
