@@ -26,16 +26,18 @@ _LOGGER = logging.getLogger(__name__)
 _SCRIPTS_DIR = Path(__file__).parent
 
 
-def _str_to_lst_of_str(a: str) -> list[str]:
+def _str_to_lst_of_str(a: str | list[str]) -> list[str]:
     """
     Convert a string to a list of string
 
     Args:
-        a: A string containing semicolon-separated values
+        a: A string containing semicolon-separated values, or an already-split list
 
     Returns:
         list of strings
     """
+    if isinstance(a, list):
+        return a
     return list(f.strip() for f in a.split(";") if f.strip())
 
 
@@ -67,10 +69,11 @@ ESPHOME_IDF_DEFAULT_FEATURES = _str_to_lst_of_str(
 )
 
 ESPHOME_IDF_FRAMEWORK_MIRRORS = _str_to_lst_of_str(
-    os.environ.get(
-        "ESPHOME_IDF_FRAMEWORK_MIRRORS",
-        "https://github.com/espressif/esp-idf/releases/download/v{VERSION}/esp-idf-v{VERSION}.zip;https://github.com/espressif/esp-idf/releases/download/v{MAJOR}.{MINOR}/esp-idf-v{MAJOR}.{MINOR}.zip",
-    )
+    os.environ.get("ESPHOME_IDF_FRAMEWORK_MIRRORS")
+    or [
+        "https://github.com/esphome-libs/esp-idf/releases/download/v{VERSION}/esp-idf-v{VERSION}.tar.xz",
+        "https://github.com/esphome-libs/esp-idf/releases/download/v{MAJOR}.{MINOR}/esp-idf-v{MAJOR}.{MINOR}.tar.xz",
+    ]
 )
 
 ESP_IDF_CONSTRAINTS_MIRRORS = _str_to_lst_of_str(
@@ -786,6 +789,7 @@ def _check_esphome_idf_framework_install(
     tools: list[str],
     force: bool = False,
     env: dict[str, str] | None = None,
+    source_url: str | None = None,
 ) -> tuple[Path, bool]:
     """
     Check and install ESP-IDF framework.
@@ -796,6 +800,11 @@ def _check_esphome_idf_framework_install(
         tools: list of tools to install
         force: If True, force reinstallation
         env: Optional dictionary of environment variables to set
+        source_url: Optional override URL for the framework tarball. Supports
+            the same ``{VERSION}`` / ``{MAJOR}`` / ``{MINOR}`` / ``{PATCH}`` /
+            ``{EXTRA}`` substitutions as ESPHOME_IDF_FRAMEWORK_MIRRORS. When
+            set, it replaces the default mirror list — no implicit fallback,
+            so a misspelled URL fails loudly.
 
     Returns:
         tuple of (framework_path, install_flag)
@@ -817,6 +826,10 @@ def _check_esphome_idf_framework_install(
     env_stamp_file = framework_path / ESPHOME_STAMP_FILE
     idf_tools_path = framework_path / "tools" / "idf_tools.py"
     _LOGGER.info("Checking ESP-IDF %s framework ...", version)
+    # Logged every invocation (not just on install) so the user can verify the
+    # override. A changed URL needs ``esphome clean`` to force a re-download.
+    if source_url:
+        _LOGGER.info("Using framework source override: %s", source_url)
 
     # 2. Download and extract the framework if not already extracted.
     # The marker is written last after extraction succeeds, so its presence
@@ -844,9 +857,8 @@ def _check_esphome_idf_framework_install(
             except ValueError:
                 pass
 
-            download_from_mirrors(
-                ESPHOME_IDF_FRAMEWORK_MIRRORS, substitutions, tmp.file
-            )
+            mirrors = [source_url] if source_url else ESPHOME_IDF_FRAMEWORK_MIRRORS
+            download_from_mirrors(mirrors, substitutions, tmp.file)
 
             _LOGGER.info("Extracting ESP-IDF %s framework ...", version)
             archive_extract_all(tmp.file, framework_path, progress_header="Extracting")
@@ -1008,6 +1020,7 @@ def check_esp_idf_install(
     tools: list[str] | None = None,
     features: list[str] | None = None,
     force: bool = False,
+    source_url: str | None = None,
 ) -> tuple[Path, Path]:
     """
     Check and install ESP-IDF framework and Python environment.
@@ -1018,6 +1031,10 @@ def check_esp_idf_install(
         tools: list of tools to install
         features: Features to install
         force: If True, force reinstallation
+        source_url: Optional override URL for the framework tarball. When
+            set, it replaces the default mirror list (no fallback). Forwarded
+            to ``_check_esphome_idf_framework_install``; supports the same URL
+            substitutions.
 
     Returns:
         tuple of (framework_path, python_env_path)
@@ -1040,7 +1057,7 @@ def check_esp_idf_install(
 
     # 1) Framework
     framework_path, installed = _check_esphome_idf_framework_install(
-        version, targets, tools, force=force, env=env
+        version, targets, tools, force=force, env=env, source_url=source_url
     )
 
     features = features or ESPHOME_IDF_DEFAULT_FEATURES
